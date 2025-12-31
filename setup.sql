@@ -2,8 +2,7 @@
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- 1. Create Tables
-
--- Profiles Table
+-- Users/Profiles should be created by the application/auth flow, but we define the table here.
 CREATE TABLE IF NOT EXISTS public.profiles (
     id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
     full_name TEXT NOT NULL,
@@ -38,7 +37,6 @@ CREATE TABLE IF NOT EXISTS public.profiles (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- Stats Table
 CREATE TABLE IF NOT EXISTS public.stats (
     id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
     title TEXT NOT NULL,
@@ -49,7 +47,6 @@ CREATE TABLE IF NOT EXISTS public.stats (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- Highlights Table
 CREATE TABLE IF NOT EXISTS public.highlights (
     id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
     title TEXT NOT NULL,
@@ -61,7 +58,6 @@ CREATE TABLE IF NOT EXISTS public.highlights (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- Works Table
 CREATE TABLE IF NOT EXISTS public.works (
     id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
     title TEXT NOT NULL,
@@ -79,7 +75,6 @@ CREATE TABLE IF NOT EXISTS public.works (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- Activities Table
 CREATE TABLE IF NOT EXISTS public.activities (
     id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
     title TEXT NOT NULL,
@@ -97,7 +92,6 @@ CREATE TABLE IF NOT EXISTS public.activities (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- Certificates Table
 CREATE TABLE IF NOT EXISTS public.certificates (
     id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
     title TEXT NOT NULL,
@@ -115,7 +109,6 @@ CREATE TABLE IF NOT EXISTS public.certificates (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- PA Categories Table
 CREATE TABLE IF NOT EXISTS public.pa_categories (
     id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
     category_number INTEGER NOT NULL,
@@ -125,7 +118,6 @@ CREATE TABLE IF NOT EXISTS public.pa_categories (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- PA Indicators Table
 CREATE TABLE IF NOT EXISTS public.pa_indicators (
     id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
     category_id UUID REFERENCES public.pa_categories(id) ON DELETE CASCADE,
@@ -135,7 +127,6 @@ CREATE TABLE IF NOT EXISTS public.pa_indicators (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- PA Works Table
 CREATE TABLE IF NOT EXISTS public.pa_works (
     id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
     indicator_id UUID REFERENCES public.pa_indicators(id) ON DELETE CASCADE,
@@ -146,7 +137,6 @@ CREATE TABLE IF NOT EXISTS public.pa_works (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- PA Indicator Images Table
 CREATE TABLE IF NOT EXISTS public.pa_indicator_images (
     id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
     indicator_id UUID REFERENCES public.pa_indicators(id) ON DELETE CASCADE,
@@ -156,7 +146,17 @@ CREATE TABLE IF NOT EXISTS public.pa_indicator_images (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- 2. Row Level Security (RLS)
+-- 2. Add Unique Constraints safely (for idempotent seed data)
+DO $$ 
+BEGIN 
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'pa_categories_number_key') THEN 
+        ALTER TABLE pa_categories ADD CONSTRAINT pa_categories_number_key UNIQUE (category_number); 
+    END IF; 
+    -- We don't force unique on indicators because numbers might repeat across categories if schema changes, 
+    -- but for seed data we will assume unique combination or just handle by number check in INSERT.
+END $$;
+
+-- 3. Row Level Security (RLS)
 
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE stats ENABLE ROW LEVEL SECURITY;
@@ -196,7 +196,7 @@ CREATE POLICY "Users can modify pa_indicators" ON pa_indicators FOR ALL USING (a
 CREATE POLICY "Users can modify pa_works" ON pa_works FOR ALL USING (auth.role() = 'authenticated');
 CREATE POLICY "Users can modify pa_indicator_images" ON pa_indicator_images FOR ALL USING (auth.role() = 'authenticated');
 
--- 3. Storage Buckets
+-- 4. Storage Buckets
 
 -- Helper function to creating buckets safely
 INSERT INTO storage.buckets (id, name, public) 
@@ -229,7 +229,110 @@ CREATE POLICY "Public Access PA" ON storage.objects FOR SELECT USING (bucket_id 
 CREATE POLICY "Auth Upload PA" ON storage.objects FOR INSERT WITH CHECK (bucket_id = 'pa-images' AND auth.role() = 'authenticated');
 CREATE POLICY "Auth Delete PA" ON storage.objects FOR DELETE USING (bucket_id = 'pa-images' AND auth.role() = 'authenticated');
 
--- 4. Initial Trigger for Profile Creation (Optional but recommended)
--- Unlike standard Supabase auth triggers, your app logic seems to manually insert/update profiles or relies on the first user.
--- We will leave it flexible but you might want to auto-create a profile row for new users if you switch to multi-user later.
--- For now, the AdminProfile component handles upsert.
+-- 5. SEED DATA (Standard Data Population)
+
+-- 5.1 PA Categories (Standard 3 Domains)
+INSERT INTO public.pa_categories (category_number, title, icon, color)
+VALUES
+  (1, 'ด้านการจัดการเรียนรู้', 'BookOpen', 'from-blue-600 to-cyan-500'),
+  (2, 'ด้านการส่งเสริมและสนับสนุนการจัดการเรียนรู้', 'Users', 'from-emerald-500 to-teal-400'),
+  (3, 'ด้านการพัฒนาตนเองและวิชาชีพ', 'TrendingUp', 'from-purple-600 to-pink-500')
+ON CONFLICT (category_number) DO NOTHING;
+
+-- 5.2 PA Indicators (Standard 15 Indicators for ว9/2564)
+-- We use a CTE or variables, but for plain SQL we can use subqueries.
+
+-- Category 1: Learning Management
+INSERT INTO public.pa_indicators (category_id, indicator_number, name, description)
+SELECT id, '1.1', 'สร้างและหรือพัฒนาหลักสูตร', 'การจัดทำรายวิชาและหน่วยการเรียนรู้ให้สอดคล้องกับมาตรฐานการเรียนรู้ และตัวชี้วัดหรือผลการเรียนรู้ ตามหลักสูตร'
+FROM public.pa_categories WHERE category_number = 1
+AND NOT EXISTS (SELECT 1 FROM public.pa_indicators WHERE indicator_number = '1.1');
+
+INSERT INTO public.pa_indicators (category_id, indicator_number, name, description)
+SELECT id, '1.2', 'ออกแบบการจัดการเรียนรู้', 'เน้นผู้เรียนเป็นสำคัญ เพื่อให้ผู้เรียนมีความรู้ ทักษะ คุณลักษณะประจำวิชา คุณลักษณะอันพึงประสงค์ และสมรรถนะที่สำคัญ'
+FROM public.pa_categories WHERE category_number = 1
+AND NOT EXISTS (SELECT 1 FROM public.pa_indicators WHERE indicator_number = '1.2');
+
+INSERT INTO public.pa_indicators (category_id, indicator_number, name, description)
+SELECT id, '1.3', 'จัดกิจกรรมการเรียนรู้', 'อำนวยความสะดวกในการเรียนรู้ และส่งเสริมผู้เรียนได้พัฒนาเต็มตามศักยภาพ เรียนรู้และทำงานร่วมกัน'
+FROM public.pa_categories WHERE category_number = 1
+AND NOT EXISTS (SELECT 1 FROM public.pa_indicators WHERE indicator_number = '1.3');
+
+INSERT INTO public.pa_indicators (category_id, indicator_number, name, description)
+SELECT id, '1.4', 'สร้างและหรือพัฒนาสื่อ นวัตกรรม เทคโนโลยี และแหล่งเรียนรู้', 'สอดคล้องกับกิจกรรมการเรียนรู้'
+FROM public.pa_categories WHERE category_number = 1
+AND NOT EXISTS (SELECT 1 FROM public.pa_indicators WHERE indicator_number = '1.4');
+
+INSERT INTO public.pa_indicators (category_id, indicator_number, name, description)
+SELECT id, '1.5', 'วัดและประเมินผลการเรียนรู้', 'ประเมินผลการเรียนรู้ด้วยวิธีการที่หลากหลาย เหมาะสม และสอดคล้องกับมาตรฐานการเรียนรู้'
+FROM public.pa_categories WHERE category_number = 1
+AND NOT EXISTS (SELECT 1 FROM public.pa_indicators WHERE indicator_number = '1.5');
+
+INSERT INTO public.pa_indicators (category_id, indicator_number, name, description)
+SELECT id, '1.6', 'ศึกษา วิเคราะห์ และสังเคราะห์ เพื่อแก้ปัญหาหรือพัฒนาการเรียนรู้', 'ทำการศึกษา วิเคราะห์ และสังเคราะห์ เพื่อแก้ปัญหาหรือพัฒนาการเรียนรู้ที่ส่งผลต่อคุณภาพผู้เรียน'
+FROM public.pa_categories WHERE category_number = 1
+AND NOT EXISTS (SELECT 1 FROM public.pa_indicators WHERE indicator_number = '1.6');
+
+INSERT INTO public.pa_indicators (category_id, indicator_number, name, description)
+SELECT id, '1.7', 'จัดบรรยากาศที่ส่งเสริมและพัฒนาผู้เรียน', 'จัดบรรยากาศที่เหมาะสม สอดคล้องกับความแตกต่างผู้เรียนเป็นรายบุคคล'
+FROM public.pa_categories WHERE category_number = 1
+AND NOT EXISTS (SELECT 1 FROM public.pa_indicators WHERE indicator_number = '1.7');
+
+INSERT INTO public.pa_indicators (category_id, indicator_number, name, description)
+SELECT id, '1.8', 'อบรมและพัฒนาคุณลักษณะที่ดีของผู้เรียน', 'อบรมบ่มนิสัยให้ผู้เรียนมีคุณธรรม จริยธรรม คุณลักษณะอันพึงประสงค์ และค่านิยมความเป็นไทยที่ดีงาม'
+FROM public.pa_categories WHERE category_number = 1
+AND NOT EXISTS (SELECT 1 FROM public.pa_indicators WHERE indicator_number = '1.8');
+
+-- Category 2: Learning Support & Support
+INSERT INTO public.pa_indicators (category_id, indicator_number, name, description)
+SELECT id, '2.1', 'จัดทำข้อมูลสารสนเทศของผู้เรียนและรายวิชา', 'จัดทำข้อมูลสารสนเทศของผู้เรียนและรายวิชาเพื่อใช้ในการส่งเสริมสนับสนุนการเรียนรู้'
+FROM public.pa_categories WHERE category_number = 2
+AND NOT EXISTS (SELECT 1 FROM public.pa_indicators WHERE indicator_number = '2.1');
+
+INSERT INTO public.pa_indicators (category_id, indicator_number, name, description)
+SELECT id, '2.2', 'ดำเนินการตามระบบดูแลช่วยเหลือผู้เรียน', 'ใช้ข้อมูลสารสนเทศเกี่ยวกับผู้เรียนรายบุคคล และประสานความร่วมมือกับผู้มีส่วนเกี่ยวข้องเพื่อพัฒนาและแก้ปัญหาผู้เรียน'
+FROM public.pa_categories WHERE category_number = 2
+AND NOT EXISTS (SELECT 1 FROM public.pa_indicators WHERE indicator_number = '2.2');
+
+INSERT INTO public.pa_indicators (category_id, indicator_number, name, description)
+SELECT id, '2.3', 'ปฏิบัติงานวิชาการ และงานอื่น ๆ ของสถานศึกษา', 'ร่วมปฏิบัติงานทางวิชาการ และงานอื่น ๆ ของสถานศึกษาเพื่อยกระดับคุณภาพการจัดการศึกษาของสถานศึกษา'
+FROM public.pa_categories WHERE category_number = 2
+AND NOT EXISTS (SELECT 1 FROM public.pa_indicators WHERE indicator_number = '2.3');
+
+INSERT INTO public.pa_indicators (category_id, indicator_number, name, description)
+SELECT id, '2.4', 'ประสานความร่วมมือกับผู้ปกครอง ภาคีเครือข่าย หรือสถานประกอบการ', 'ประสานความร่วมมือกับผู้ปกครอง ภาคีเครือข่าย หรือสถานประกอบการ เพื่อร่วมกันพัฒนาผู้เรียน'
+FROM public.pa_categories WHERE category_number = 2
+AND NOT EXISTS (SELECT 1 FROM public.pa_indicators WHERE indicator_number = '2.4');
+
+-- Category 3: Self & Professional Development
+INSERT INTO public.pa_indicators (category_id, indicator_number, name, description)
+SELECT id, '3.1', 'พัฒนาตนเองอย่างเป็นระบบและต่อเนื่อง', 'พัฒนาตนเองอย่างเป็นระบบและต่อเนื่อง เพื่อให้มีความรู้ความสามารถ ทักษะ โดยเฉพาะอย่างยิ่งการใช้ภาษาไทยและภาษาอังกฤษเพื่อการสื่อสาร'
+FROM public.pa_categories WHERE category_number = 3
+AND NOT EXISTS (SELECT 1 FROM public.pa_indicators WHERE indicator_number = '3.1');
+
+INSERT INTO public.pa_indicators (category_id, indicator_number, name, description)
+SELECT id, '3.2', 'มีส่วนร่วมในการแลกเปลี่ยนเรียนรู้ทางวิชาชีพ', 'มีส่วนร่วมในการแลกเปลี่ยนเรียนรู้ทางวิชาชีพเพื่อพัฒนาการจัดการเรียนรู้'
+FROM public.pa_categories WHERE category_number = 3
+AND NOT EXISTS (SELECT 1 FROM public.pa_indicators WHERE indicator_number = '3.2');
+
+INSERT INTO public.pa_indicators (category_id, indicator_number, name, description)
+SELECT id, '3.3', 'นำความรู้ความสามารถ ทักษะที่ได้จากการพัฒนาตนเองและวิชาชีพมาใช้', 'นำความรู้ความสามารถ ทักษะที่ได้จากการพัฒนาตนเองและวิชาชีพมาใช้ในการพัฒนาการจัดการเรียนรู้'
+FROM public.pa_categories WHERE category_number = 3
+AND NOT EXISTS (SELECT 1 FROM public.pa_indicators WHERE indicator_number = '3.3');
+
+-- 5.3 Highlights (Sample Data)
+INSERT INTO public.highlights (title, description, icon_name, color_class, bg_class, display_order)
+SELECT 'ประสบการณ์ 8 ปี', 'สอนในระดับชั้นมัธยมศึกษา', 'GraduationCap', 'text-blue-600', 'bg-blue-100', 1
+WHERE NOT EXISTS (SELECT 1 FROM public.highlights LIMIT 1);
+
+INSERT INTO public.highlights (title, description, icon_name, color_class, bg_class, display_order)
+SELECT 'นักเรียน 300+', 'ดูแลนักเรียนที่ปรึกษาและรายวิชา', 'Users', 'text-green-600', 'bg-green-100', 2
+WHERE NOT EXISTS (SELECT 1 FROM public.highlights LIMIT 1);
+
+INSERT INTO public.highlights (title, description, icon_name, color_class, bg_class, display_order)
+SELECT 'พัฒนาตนเอง 100+ ชม.', 'อบรมและพัฒนาวิชาชีพอย่างต่อเนื่อง', 'BookOpen', 'text-purple-600', 'bg-purple-100', 3
+WHERE NOT EXISTS (SELECT 1 FROM public.highlights LIMIT 1);
+
+INSERT INTO public.highlights (title, description, icon_name, color_class, bg_class, display_order)
+SELECT 'รางวัลครูดีเด่น', 'ระดับจังหวัด ปี 2567', 'Award', 'text-orange-600', 'bg-orange-100', 4
+WHERE NOT EXISTS (SELECT 1 FROM public.highlights LIMIT 1);
