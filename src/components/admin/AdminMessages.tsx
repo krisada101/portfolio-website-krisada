@@ -12,7 +12,7 @@ interface Message {
     email: string;
     subject: string;
     message: string;
-    is_read: boolean;
+    read: boolean;
     created_at: string;
 }
 
@@ -49,7 +49,7 @@ export function AdminMessages() {
     };
 
     const handleToggleRead = async (id: string, currentStatus: boolean) => {
-        const { error } = await (supabase.from("messages") as any).update({ is_read: !currentStatus }).eq("id", id);
+        const { error } = await (supabase.from("messages") as any).update({ read: !currentStatus }).eq("id", id);
         if (!error) {
             fetchMessages();
         }
@@ -71,7 +71,7 @@ export function AdminMessages() {
                     <div className="text-center py-8 text-muted-foreground">ยังไม่มีข้อความใหม่</div>
                 ) : (
                     messages.map((msg) => (
-                        <div key={msg.id} className={`p-4 rounded-lg border ${msg.is_read ? 'bg-muted/30 border-border' : 'bg-primary/5 border-primary/20'} transition-all`}>
+                        <div key={msg.id} className={`p-4 rounded-lg border ${msg.read ? 'bg-muted/30 border-border' : 'bg-primary/5 border-primary/20'} transition-all`}>
                             <div className="flex justify-between items-start mb-2">
                                 <div>
                                     <h4 className="font-semibold text-lg">{msg.subject || "(ไม่มีหัวข้อ)"}</h4>
@@ -89,10 +89,10 @@ export function AdminMessages() {
                                     <Button
                                         variant="ghost"
                                         size="sm"
-                                        onClick={() => handleToggleRead(msg.id, msg.is_read)}
-                                        title={msg.is_read ? "ทำเครื่องหมายว่ายังไม่ร่าน" : "ทำเครื่องหมายว่าอ่านแล้ว"}
+                                        onClick={() => handleToggleRead(msg.id, msg.read)}
+                                        title={msg.read ? "ทำเครื่องหมายว่ายังไม่ร่าน" : "ทำเครื่องหมายว่าอ่านแล้ว"}
                                     >
-                                        <CheckCircle className={`w-4 h-4 ${msg.is_read ? 'text-green-500' : 'text-gray-300'}`} />
+                                        <CheckCircle className={`w-4 h-4 ${msg.read ? 'text-green-500' : 'text-gray-300'}`} />
                                     </Button>
                                     <Button
                                         variant="ghost"
