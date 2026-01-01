@@ -91,7 +91,7 @@ export function ActivitiesSection() {
                   <div className="flex flex-col sm:flex-row">
                     {/* Image Section */}
                     <div className={`sm:w-1/3 p-8 bg-gradient-to-br ${activity.color_gradient_class} flex items-center justify-center`}>
-                      <span className="text-6xl group-hover:scale-110 transition-transform">
+                      <span className="text-6xl group-hover:scale-110 transition-transform drop-shadow-md">
                         {activity.image_emoji}
                       </span>
                     </div>

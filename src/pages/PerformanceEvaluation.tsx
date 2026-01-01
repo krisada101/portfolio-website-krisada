@@ -333,8 +333,8 @@ export default function PerformanceEvaluation() {
                     >
                       {/* Category Header */}
                       <div className="flex items-center gap-4 mb-6">
-                        <div className={`w-14 h-14 rounded-2xl bg-gradient-to-br ${category.color} flex items-center justify-center`}>
-                          <IconComp className="w-7 h-7 text-white" />
+                        <div className={`w-14 h-14 rounded-2xl bg-${category.color}-100 flex items-center justify-center`}>
+                          <IconComp className={`w-7 h-7 text-${category.color}-600`} />
                         </div>
                         <div>
                           <h2 className="text-xl md:text-2xl font-bold text-foreground leading-relaxed">
